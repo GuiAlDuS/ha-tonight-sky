@@ -1,0 +1,6 @@
+# your own overrides and the scripts' caches
+config.json
+.satellites_cache.json
+.clouds_cache.json
+__pycache__/
+*.pyc

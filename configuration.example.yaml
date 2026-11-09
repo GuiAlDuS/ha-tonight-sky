@@ -1,0 +1,51 @@
+# Add to configuration.yaml. If you already have a `command_line:` section,
+# add the three `- sensor:` entries to it.
+command_line:
+  # Planets and the Moon tonight: computed locally, no internet
+  - sensor:
+      name: "Tonight sky"
+      unique_id: tonight_sky
+      icon: mdi:telescope
+      command: "python3 /config/tonight_sky/sensors/tonight.py"
+      value_template: "{{ value_json.state }}"
+      json_attributes:
+        - night
+        - planets
+        - moon
+        - upcoming
+        - updated
+      scan_interval: 3600
+      command_timeout: 60
+  # Visible satellite passes: N2YO (needs n2yo_api_key in config.json)
+  - sensor:
+      name: "Tonight satellites"
+      unique_id: tonight_satellites
+      icon: mdi:satellite-variant
+      command: "python3 /config/tonight_sky/sensors/satellites.py"
+      value_template: "{{ value_json.state }}"
+      json_attributes:
+        - passes
+        - checked
+      scan_interval: 7200
+      command_timeout: 60
+  # Cloud cover per hour: Open-Meteo
+  - sensor:
+      name: "Tonight clouds"
+      unique_id: tonight_clouds
+      icon: mdi:weather-night-partly-cloudy
+      command: "python3 /config/tonight_sky/sensors/clouds.py"
+      value_template: "{{ value_json.state }}"
+      unit_of_measurement: "%"
+      json_attributes:
+        - hours
+        - checked
+      scan_interval: 3600
+      command_timeout: 30
+
+# Optional: the sensors carry long attributes; keep them out of the database
+# recorder:
+#   exclude:
+#     entities:
+#       - sensor.tonight_sky
+#       - sensor.tonight_satellites
+#       - sensor.tonight_clouds
