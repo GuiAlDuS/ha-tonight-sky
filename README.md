@@ -33,8 +33,9 @@ and time zone are the ones Home Assistant already has.
 - **Clouds.** The forecast cloud cover for every hour of the night, on the
   same time axis.
 - **Plain sentences.** "Tonight's best: Saturn, almost overhead at 20:56, in
-  the south", then one line per planet and per satellite pass, and when each
-  missing planet will be visible again.
+  the south", then one line per planet and per satellite pass in order of
+  appearance, and when each planet or satellite that is missing tonight will
+  be visible again, the soonest first.
 - **Satellites.** The International Space Station, the Chinese station
   Tiangong, the Hubble telescope and a BlueBird satellite, when they make a
   bright, high pass.
@@ -103,6 +104,8 @@ The passes appear at the sensor's next update (within two hours, or restart).
   night. Uranus and Neptune are left out.
 - **A satellite pass is listed** if it is the ISS, or if it is brighter than
   magnitude 3 and climbs to at least 25°. At most five passes a night.
+  A satellite with no such pass tonight says when its next one is, looking
+  10 days ahead.
 - **Tonight's best** is the highest, brightest thing in the clearest hour: a
   clear hour beats a cloudy one, a bright satellite pass beats a planet, a
   brighter planet beats a fainter one.

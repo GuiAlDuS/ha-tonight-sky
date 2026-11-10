@@ -42,12 +42,13 @@ from zoneinfo import ZoneInfo
 import settings
 
 ISS = 25544
-# NORAD id, standard magnitude, height (km), days ahead.  Names live in build_card.py.
+# NORAD id, standard magnitude, height (km), days ahead (10 is N2YO's most; the card says
+# when each satellite is next seen).  Names live in build_card.py.
 SATS = [
     (ISS, -1.8, 420, 10),      # International Space Station
-    (48274, 0.0, 385, 3),      # Tiangong (Chinese space station)
-    (20580, 2.2, 525, 3),      # Hubble Space Telescope
-    (61047, 3.8, 520, 3),      # BlueBird (AST SpaceMobile, 64 m2 antenna)
+    (48274, 0.0, 385, 10),      # Tiangong (Chinese space station)
+    (20580, 2.2, 525, 10),      # Hubble Space Telescope
+    (61047, 3.8, 520, 10),      # BlueBird (AST SpaceMobile, 64 m2 antenna)
 ]
 MAG_MAX, EL_MIN, MAX_PER_NIGHT = 3.0, 25, 5
 MIN_VISIBLE_S = 120

@@ -154,9 +154,9 @@ Tonight's best: {{ names[b.id] }}, {{ height(b.alt_max) }}
 {%- elif p.t_max == n.end %} highest at dawn, {{ p.alt_max }}° up in the {{ dirn(p.az_max) }}.
 {%- else %} highest at {{ hm(p.t_max) }}, in the {{ dirn(p.az_max) }} ({{ p.alt_max }}°).{% endif %}{% endif %}
 {%- endmacro -%}
-{%- macro iss_absent(nx) -%}
-{{ diamond(25544) }}{{ sat_name(25544, 1) }} · no pass tonight.
-{%- if nx %}{% set q = nx[0] %} Next visible {{ day(q.visible) }} at {{ hm(q.visible) }}, {{ pass_words(q) }} ({{ level(q.mag) }}).
+{%- macro sat_absent(id, q) -%}
+{{ diamond(id) }}{{ sat_name(id, 1) }} · no pass tonight.
+{%- if q %} Next visible {{ day(q.visible) }} at {{ hm(q.visible) }}, {{ pass_words(q) }} ({{ level(q.mag) }}).
 {%- else %} No visible pass in the next 10 days.{% endif %}
 {%- endmacro -%}
 {%- macro upcoming_line(q) -%}
@@ -247,9 +247,9 @@ Lo mejor de esta noche: {{ names[b.id] }}, {{ height(b.alt_max) }}
 {%- elif p.t_max == n.end %} lo más alto al amanecer, a {{ p.alt_max }}° al {{ dirn(p.az_max) }}.
 {%- else %} lo más alto a las {{ hm(p.t_max) }}, al {{ dirn(p.az_max) }} ({{ p.alt_max }}°).{% endif %}{% endif %}
 {%- endmacro -%}
-{%- macro iss_absent(nx) -%}
-{{ diamond(25544) }}{{ sat_name(25544, 1) }} · no pasa esta noche.
-{%- if nx %}{% set q = nx[0] %} Vuelve a verse {{ day(q.visible) }} a las {{ hm(q.visible) }}, {{ pass_words(q) }} ({{ level(q.mag) }}).
+{%- macro sat_absent(id, q) -%}
+{{ diamond(id) }}{{ sat_name(id, 1) }} · no pasa esta noche.
+{%- if q %} Vuelve a verse {{ day(q.visible) }} a las {{ hm(q.visible) }}, {{ pass_words(q) }} ({{ level(q.mag) }}).
 {%- else %} Ningún paso visible en los próximos 10 días.{% endif %}
 {%- endmacro -%}
 {%- macro upcoming_line(q) -%}
@@ -717,25 +717,34 @@ BODY_MD = """\
 ---
 
 {#- one list: tonight's planets and satellite passes in order of appearance (as the timeline),
-    each with its mark; the ISS, when it does not pass tonight, says when it is next seen; then
-    the planets that are lost near the Sun -#}
+    each with its mark (same time: by name). Then what is not seen tonight, satellites and the
+    planets lost near the Sun in one list, the soonest to be seen again first; last the
+    satellites with no pass in the days asked, by name. Without any pass known (no N2YO key)
+    no satellite is listed. -#}
 {%- set it = namespace(items=[]) -%}
-{%- for p in ps %}{% set it.items = it.items + [{'t': p.start, 'k': 'p', 'o': p}] %}{% endfor -%}
+{%- for p in ps %}{% set it.items = it.items + [{'t': p.start, 'nm': names[p.id], 'k': 'p', 'o': p}] %}{% endfor -%}
 {%- set tonight = sats | selectattr('visible', 'lt', n.end) | selectattr('end', 'gt', nows) | list -%}
-{%- for q in tonight %}{% set it.items = it.items + [{'t': q.visible, 'k': 's', 'o': q}] %}{% endfor %}
+{%- for q in tonight %}{% set it.items = it.items + [{'t': q.visible, 'nm': sat_name(q.id, 1), 'k': 's', 'o': q}] %}{% endfor %}
 
 <font size="3">{{ title }}</font>
 
-{% for x in it.items | sort(attribute='t') -%}
+{% for x in it.items | sort(attribute='t,nm') -%}
 {%- if x.k == 's' %}{{ sat_line(x.o) }}{% else %}{{ planet_line(x.o) }}{% endif %}
 
 {% endfor -%}
-{%- if sats and not (tonight | selectattr('id', 'eq', 25544) | list) -%}
-{{ iss_absent(sats | selectattr('id', 'eq', 25544) | selectattr('end', 'gt', nows) | list) }}
+{%- set nt = namespace(dated=[], none=[]) -%}
+{%- for id in satn if sats and not (tonight | selectattr('id', 'eq', id) | list) -%}
+{%- set nx = sats | selectattr('id', 'eq', id) | selectattr('end', 'gt', nows) | list -%}
+{%- if nx %}{% set nt.dated = nt.dated + [{'t': nx[0].visible, 'nm': sat_name(id, 1), 'k': 's', 'id': id, 'o': nx[0]}] -%}
+{%- else %}{% set nt.none = nt.none + [{'nm': sat_name(id, 1), 'id': id}] %}{% endif -%}
+{%- endfor -%}
+{%- for q in later %}{% set nt.dated = nt.dated + [{'t': q.start, 'nm': names[q.id], 'k': 'p', 'o': q}] %}{% endfor -%}
+{%- for x in nt.dated | sort(attribute='t,nm') -%}
+{%- if x.k == 's' %}{{ sat_absent(x.id, x.o) }}{% else %}{{ upcoming_line(x.o) }}{% endif %}
 
-{% endif -%}
-{%- for q in later -%}
-{{ upcoming_line(q) }}
+{% endfor -%}
+{%- for x in nt.none | sort(attribute='nm') -%}
+{{ sat_absent(x.id, none) }}
 
 {% endfor -%}
 {%- endif -%}
