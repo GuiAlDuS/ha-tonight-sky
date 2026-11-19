@@ -33,7 +33,14 @@ How the card is put together
     Score = past * 10000 + cloud class * 1000 + rank * 100 + (90 - altitude),
     lowest wins: a clearer hour beats a cloudy one, a satellite beats a planet,
     a brighter planet a fainter one, higher beats lower.
+  * Brightness is said in words and as a magnitude on every line ("bright
+    (magnitude 0.8)"); satellite and planet marks are sized from it. The word
+    steps are in LANG twice, `level` (Jinja) and `level` (JavaScript): keep
+    them in step.
+  * The Moon is drawn with its phase, its bright side turned towards the Sun.
+  * Starlink trains come from an optional sensor; without it nothing shows.
   * Both cards are one fixed "night panel" in light and dark themes.
+  * How every number is computed: docs/how-it-works.md.
 
 All wording lives in LANG (English and Spanish). To add a language, copy one
 block and translate it.
@@ -52,6 +59,8 @@ NIGHT_CARD = ('ha-card { background: %s !important; color: #dadfe8;'
               ' --primary-text-color: #dadfe8; --secondary-text-color: #a3a9b7;'
               ' --divider-color: rgba(232, 236, 244, 0.14); }\n' % (NIGHT_BG, NIGHT_BG, NIGHT_BG))
 MOON = '#f4f1e8'
+MOON_DIM = '#42495b'   # the Moon's unlit part: MOON at 22 % over SKY, opaque so stars do not show through
+TRAIN_C = '#dadfe8'    # Starlink trains: three diamonds in the text's own ink, no new hue
 # one colour and one symbol per planet (colour + shape, so identity is never colour alone)
 BODY = {
     'mercury': ('#6fd6ff', 'triangle-up'),
@@ -110,13 +119,22 @@ LANG = {
     subNow: t => `Now, at ${t}`, subBest: t => `The sky at its best, at ${t}`, subAt: t => `The sky at ${t}`,
     clouds: c => ` · ${c} % cloud`,
     noNight: 'It does not get dark tonight at this latitude',
+    // brightness: the SAME steps as the text card's `level` / `magtxt` (keep in step)
+    level: m => m <= -1 ? 'very bright' : m <= 1 ? 'bright' : m <= 2.5 ? 'medium brightness'
+      : m <= 4 ? 'faint' : 'very faint, best with binoculars',
+    magTxt: m => { const r = Math.round(m * 10) / 10; return 'magnitude ' + (r < 0 ? '−' : '') + Math.abs(r).toFixed(1); },
+    noteMag: ['Magnitude: the lower, the brighter. The naked eye reaches about 6 in a dark sky.',
+              'Magnitude: the lower, the brighter.<br>The naked eye reaches about 6 in a dark sky.'],
+    moonLit: (who, lit) => `${who} (${lit} % lit)`,
+    trainName: 'Starlink train', trainRow: 'Train',
   }""",
         'jinja': """\
 {%- set dirs = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'] -%}
 {%- set days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] -%}
 {%- set months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] -%}
 {%- set title = 'In the sky' -%}
-{%- macro level(m) %}{{ 'very bright' if m <= -1 else 'bright' if m <= 1 else 'medium brightness' if m <= 2.5 else 'faint' }}{% endmacro -%}
+{%- macro level(m) %}{{ 'very bright' if m <= -1 else 'bright' if m <= 1 else 'medium brightness' if m <= 2.5 else 'faint' if m <= 4 else 'very faint, best with binoculars' }}{% endmacro -%}
+{%- macro magtxt(m) %}{% set r = (m | float(0)) | round(1) %}magnitude {{ '−' if r < 0 }}{{ '%.1f' | format(r | abs) }}{% endmacro -%}
 {%- macro height(a) %}{{ 'almost overhead' if a >= 70 else 'high' if a >= 40 else 'low' }}{% endmacro -%}
 {%- macro day(t) -%}
 {%- set d = as_datetime(t) -%}{%- set k = (d.date() - now().date()).days -%}
@@ -143,10 +161,10 @@ Tonight's best: {{ names[b.id] }}, {{ height(b.alt_max) }}
 {%- macro no_night() %}It does not get dark tonight at this latitude.{% endmacro -%}
 {%- macro can_see(t) %}Will it be visible? At {{ hm(t) }}, {{ cloud(t) }}.{% endmacro -%}
 {%- macro sat_line(p) -%}
-{{ diamond(p.id) }}{{ sat_name(p.id, 1) }} · {{ level(p.mag) }}: {{ day(p.visible) }} at {{ hm(p.visible) }}, {{ pass_words(p) }}.
+{{ diamond(p.id) }}{{ sat_name(p.id, 1) }} · {{ level(p.mag) }} ({{ magtxt(p.mag) }}): {{ day(p.visible) }} at {{ hm(p.visible) }}, {{ pass_words(p) }}.
 {%- endmacro -%}
 {%- macro planet_line(p) -%}
-{{ mark(p.id) }}{{ names[p.id] }} · {{ level(p.mag) }}:
+{{ mark(p.id) }}{{ names[p.id] }} · {{ level(p.mag) }} ({{ magtxt(p.mag) }}):
 {%- if p.t_max == n.end and p.start != n.start %} rises in the {{ dirn(p.az_start) }}; visible from {{ hm(p.start) }} until dawn, when it is {{ p.alt_max }}° up.
 {%- else %} {{ 'from dusk' if p.start == n.start else 'from ' ~ hm(p.start) ~ ' (in the ' ~ dirn(p.az_start) ~ ')' }}
 {{- ' until dawn' if p.end == n.end else ' until ' ~ hm(p.end) }};
@@ -156,8 +174,17 @@ Tonight's best: {{ names[b.id] }}, {{ height(b.alt_max) }}
 {%- endmacro -%}
 {%- macro sat_absent(id, q) -%}
 {{ diamond(id) }}{{ sat_name(id, 1) }} · no pass tonight.
-{%- if q %} Next visible {{ day(q.visible) }} at {{ hm(q.visible) }}, {{ pass_words(q) }} ({{ level(q.mag) }}).
+{%- if q %} Next visible {{ day(q.visible) }} at {{ hm(q.visible) }}, {{ pass_words(q) }} ({{ level(q.mag) }}, {{ magtxt(q.mag) }}).
 {%- else %} No visible pass in the next 10 days.{% endif %}
+{%- endmacro -%}
+{%- macro train_words(q) -%}
+about {{ [1, ((q.duration / 60) | round) | int] | max }} min, from the {{ dirn(q.az_start) }} to the {{ dirn(q.az_end) }}, up to {{ q.el_max }}°
+{%- endmacro -%}
+{%- macro train_line(p) -%}
+{{ trainm() }}Starlink train · a row of {{ p.n }} newly launched satellites: {{ day(p.visible) }} at {{ hm(p.visible) }}, {{ train_words(p) }}.
+{%- endmacro -%}
+{%- macro train_absent(q) -%}
+{{ trainm() }}Starlink train · no pass tonight. Visible {{ day(q.visible) }} at {{ hm(q.visible) }}, {{ train_words(q) }} (a row of {{ q.n }} newly launched satellites).
 {%- endmacro -%}
 {%- macro upcoming_line(q) -%}
 {{ mark(q.id) }}{{ names[q.id] }} · not visible these days, it is close to the Sun. Visible again {{ day(q.start) }},
@@ -203,13 +230,22 @@ Tonight's best: {{ names[b.id] }}, {{ height(b.alt_max) }}
     subNow: t => `Ahora, a las ${t}`, subBest: t => `Así se verá lo mejor, a las ${t}`, subAt: t => `Así se verá a las ${t}`,
     clouds: c => ` · ${c} % de nubes`,
     noNight: 'Esta noche no oscurece en esta latitud',
+    // brillo: los MISMOS pasos que `level` / `magtxt` de la tarjeta de texto (mantenerlos iguales)
+    level: m => m <= -1 ? 'muy brillante' : m <= 1 ? 'brillante' : m <= 2.5 ? 'brillo medio'
+      : m <= 4 ? 'tenue' : 'muy tenue, mejor con binoculares',
+    magTxt: m => { const r = Math.round(m * 10) / 10; return 'magnitud ' + (r < 0 ? '−' : '') + Math.abs(r).toFixed(1).replace('.', ','); },
+    noteMag: ['Magnitud: cuanto más baja, más brillante. A simple vista, hasta 6 en un cielo oscuro.',
+              'Magnitud: cuanto más baja, más brillante.<br>A simple vista, hasta 6 en un cielo oscuro.'],
+    moonLit: (who, lit) => `${who} (${lit} % iluminada)`,
+    trainName: 'Tren de Starlink', trainRow: 'Tren',
   }""",
         'jinja': """\
 {%- set dirs = ['norte', 'noreste', 'este', 'sureste', 'sur', 'suroeste', 'oeste', 'noroeste'] -%}
 {%- set days = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'] -%}
 {%- set months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'] -%}
 {%- set title = 'Astros' -%}
-{%- macro level(m) %}{{ 'muy brillante' if m <= -1 else 'brillante' if m <= 1 else 'brillo medio' if m <= 2.5 else 'tenue' }}{% endmacro -%}
+{%- macro level(m) %}{{ 'muy brillante' if m <= -1 else 'brillante' if m <= 1 else 'brillo medio' if m <= 2.5 else 'tenue' if m <= 4 else 'muy tenue, mejor con binoculares' }}{% endmacro -%}
+{%- macro magtxt(m) %}{% set r = (m | float(0)) | round(1) %}magnitud {{ '−' if r < 0 }}{{ ('%.1f' | format(r | abs)) | replace('.', ',') }}{% endmacro -%}
 {%- macro height(a) %}{{ 'casi sobre la cabeza' if a >= 70 else 'alto' if a >= 40 else 'bajo' }}{% endmacro -%}
 {%- macro day(t) -%}
 {%- set d = as_datetime(t) -%}{%- set k = (d.date() - now().date()).days -%}
@@ -236,10 +272,10 @@ Lo mejor de esta noche: {{ names[b.id] }}, {{ height(b.alt_max) }}
 {%- macro no_night() %}Esta noche no oscurece en esta latitud.{% endmacro -%}
 {%- macro can_see(t) %}¿Se podrá ver? A las {{ hm(t) }}, {{ cloud(t) }}.{% endmacro -%}
 {%- macro sat_line(p) -%}
-{{ diamond(p.id) }}{{ sat_name(p.id, 1) }} · {{ level(p.mag) }}: {{ day(p.visible) }} a las {{ hm(p.visible) }}, {{ pass_words(p) }}.
+{{ diamond(p.id) }}{{ sat_name(p.id, 1) }} · {{ level(p.mag) }} ({{ magtxt(p.mag) }}): {{ day(p.visible) }} a las {{ hm(p.visible) }}, {{ pass_words(p) }}.
 {%- endmacro -%}
 {%- macro planet_line(p) -%}
-{{ mark(p.id) }}{{ names[p.id] }} · {{ level(p.mag) }}:
+{{ mark(p.id) }}{{ names[p.id] }} · {{ level(p.mag) }} ({{ magtxt(p.mag) }}):
 {%- if p.t_max == n.end and p.start != n.start %} sale por el {{ dirn(p.az_start) }}; visible desde las {{ hm(p.start) }} hasta el amanecer, cuando está a {{ p.alt_max }}°.
 {%- else %} {{ 'desde que oscurece' if p.start == n.start else 'desde las ' ~ hm(p.start) ~ ' (por el ' ~ dirn(p.az_start) ~ ')' }}
 {{- ' hasta el amanecer' if p.end == n.end else ' hasta las ' ~ hm(p.end) }};
@@ -249,8 +285,17 @@ Lo mejor de esta noche: {{ names[b.id] }}, {{ height(b.alt_max) }}
 {%- endmacro -%}
 {%- macro sat_absent(id, q) -%}
 {{ diamond(id) }}{{ sat_name(id, 1) }} · no pasa esta noche.
-{%- if q %} Vuelve a verse {{ day(q.visible) }} a las {{ hm(q.visible) }}, {{ pass_words(q) }} ({{ level(q.mag) }}).
+{%- if q %} Vuelve a verse {{ day(q.visible) }} a las {{ hm(q.visible) }}, {{ pass_words(q) }} ({{ level(q.mag) }}, {{ magtxt(q.mag) }}).
 {%- else %} Ningún paso visible en los próximos 10 días.{% endif %}
+{%- endmacro -%}
+{%- macro train_words(q) -%}
+unos {{ [1, ((q.duration / 60) | round) | int] | max }} min, del {{ dirn(q.az_start) }} al {{ dirn(q.az_end) }}, hasta {{ q.el_max }}°
+{%- endmacro -%}
+{%- macro train_line(p) -%}
+{{ trainm() }}Tren de Starlink · fila de {{ p.n }} satélites recién lanzados: {{ day(p.visible) }} a las {{ hm(p.visible) }}, {{ train_words(p) }}.
+{%- endmacro -%}
+{%- macro train_absent(q) -%}
+{{ trainm() }}Tren de Starlink · no pasa esta noche. Se verá {{ day(q.visible) }} a las {{ hm(q.visible) }}, {{ train_words(q) }} (fila de {{ q.n }} satélites recién lanzados).
 {%- endmacro -%}
 {%- macro upcoming_line(q) -%}
 {{ mark(q.id) }}{{ names[q.id] }} · no se ve estos días, está cerca del Sol. Vuelve a verse {{ day(q.start) }},
@@ -270,11 +315,14 @@ BUILD = r"""({xs, ys, vars, hass}) => {
   const DIRS = __DIRS__, CONS = __CONS__, STARN = __STARN__, MOONNAME = __MOONNAME__;
   const LAT = hass.config.latitude, LON = hass.config.longitude, R = Math.PI / 180;
   const attrs = id => (hass.states[id] || {attributes: {}}).attributes;
-  const A = attrs('__E_SKY__'), I = attrs('__E_SAT__'), C = attrs('__E_CLD__');
+  const A = attrs('__E_SKY__'), I = attrs('__E_SAT__'), C = attrs('__E_CLD__'), TR = attrs('__E_TRN__');
+  // mark size from the magnitude, planets and satellites alike
+  const MSZ = m => Math.max(9, Math.min(16, 11 - 2 * m));
   const ps = A.planets || [], n = A.night || null, L = A.moon || {};
   const empty = () => { for (const k of ['sR','sT','sS','sO','cR','cT','cD','nR','nT','nD','qR','qT','qX','iR','iT','iD',
-      'kX','kC','kTxt','kTC','kD','kTV','kTT','TX','tV','tT','bY','bC','bD','bB','bX','lX','lY','lT','eX','eY','eD','eC']) vars[k] = [];
-    vars.slots = []; vars.moon = null; vars.iM = null; vars.iC = '#ffffff'; vars.key = null; vars.TN = ''; vars.nota = ['', ''];
+      'kX','kC','kTxt','kTC','kD','kTV','kTT','TX','tV','tT','bY','bC','bD','bB','bX','lX','lY','lT','eX','eY','eD','eC','eS']) vars[k] = [];
+    vars.slots = []; vars.moon = null; vars.iM = null; vars.iC = '#ffffff'; vars.iS = 11;
+    vars.mD = {r: [], t: []}; vars.mL = {r: [], t: []}; vars.key = null; vars.TN = ''; vars.nota = ['', ''];
     vars.tN = 0; vars.kRange = [new Date(), new Date(Date.now() + 432e5)]; };
   if (!n) { empty(); vars.sub = A.night === null ? S.noNight : ''; return {xs, ys}; }
   const now = Date.now(), nd = new Date(n.start).getTime(), nh = new Date(n.end).getTime();
@@ -310,6 +358,7 @@ BUILD = r"""({xs, ys, vars, hass}) => {
     const [ta, aa, za] = r[i - 1], [tb, ab, zb] = r[i], f = (t - ta) / (tb - ta);
     const dz = ((zb - za + 540) % 360) - 180; return [t, aa + (ab - aa) * f, (za + dz * f + 360) % 360]; };
   const rr = alt => 90 - alt;
+  const xy = (r, t) => [r * Math.sin(t * R), r * Math.cos(t * R)];      // dome plane: x east, y north
 
   // stars and constellations at T (J2000 positions, local sidereal time)
   const D = T / 864e5 + 2440587.5 - 2451545;
@@ -346,25 +395,53 @@ BUILD = r"""({xs, ys, vars, hass}) => {
   // the horizon rim where it will appear; when lives in the timeline.
   const body = (who, r, start) => { const q = at(r, T);
     if (q && q[1] >= 0) { const f = [q, ...r.filter(x => x[0] > T)];
-      return {r: rr(q[1]), t: q[2], rim: false, d: where(who, q[0], q[1], q[2]),
+      return {r: rr(q[1]), t: q[2], rim: false, p: q, d: where(who, q[0], q[1], q[2]),
         pr: f.map(x => rr(x[1])), pt: f.map(x => x[2]), pd: f.map(x => where(who, ...x))}; }
     const s = start && start > T ? at(r, start) : null;
-    if (s) return {r: 90, t: s[2], rim: true, d: S.rim(who, hm(start), DIR(s[2])), pr: [], pt: [], pd: []};
+    if (s) return {r: 90, t: s[2], rim: true, p: s, d: S.rim(who, hm(start), DIR(s[2])), pr: [], pt: [], pd: []};
     return {r: null, t: null, rim: false, d: '', pr: [], pt: [], pd: []}; };
   vars.slots = ps.map(p => { const r = path(p.path).filter(x => x[1] >= 0), [c, sym] = BODY[p.id] || ['#ffffff', 'circle'];
     const b = body(NAME[p.id] || p.id, r, new Date(p.start).getTime());
     // a cross has less ink than a filled disc: larger, to weigh the same; smaller on the rim
-    return {c, size: Math.max(9, Math.min(16, 11 - 2 * p.mag)) * (sym == 'cross' ? 1.4 : 1) * (b.rim ? 0.8 : 1), ...b, sym}; });
+    return {c, size: MSZ(p.mag) * (sym == 'cross' ? 1.4 : 1) * (b.rim ? 0.8 : 1), ...b, sym}; });
   // the Moon (counted as visible from 5 deg up)
   const lp = path(L.path), lv = lp.filter(x => x[1] >= 0), l5 = lp.filter(x => x[1] >= 5);
-  vars.moon = body(MOONNAME, lv, l5[0] ? l5[0][0] : null);
+  vars.moon = body(L.lit != null ? S.moonLit(MOONNAME, L.lit) : MOONNAME, lv, l5[0] ? l5[0][0] : null);
   // rim marks at least 8 deg apart: push later ones along the rim
   const rim = [...vars.slots, vars.moon].filter(b => b.rim).sort((a, b) => a.t - b.t);
   rim.forEach((b, k) => { if (k && b.t - rim[k - 1].t < 8) b.t = rim[k - 1].t + 8; });
+  // the Moon's phase: a dim disc and, over it, the sunlit part, as two outlines in dome units.
+  // The bright side points to the Sun: one degree along the great circle from the Moon to the
+  // Sun (low-precision Sun, at the moment the mark stands for) gives the direction on the dome.
+  // In the frame where the Sun is at +x the lit part is the limb's half circle on that side
+  // closed by the terminator, a half ellipse of half-width (1 - 2k), k = lit fraction.
+  // The dome is a map (east on the right), so the Moon is mirrored like the constellations.
+  const sunAt = t => { const d = t / 864e5 + 2440587.5 - 2451545, g = (357.528 + 0.9856003 * d) * R;
+    const lam = (280.460 + 0.9856474 * d + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * R, e = 23.439 * R;
+    const ra = Math.atan2(Math.cos(e) * Math.sin(lam), Math.cos(lam)) / R, dec = Math.asin(Math.sin(e) * Math.sin(lam));
+    const H = (280.46061837 + 360.98564736629 * d + LON - ra) * R, sd = Math.sin(dec), cd = Math.cos(dec);
+    return [Math.asin(sd * sl + cd * cl * Math.cos(H)) / R, Math.atan2(-cd * Math.sin(H), sd * cl - cd * sl * Math.cos(H)) / R]; };
+  const vw = window.innerWidth, domeW = vw < 870 ? vw - 32 : (vw - 320 - 16) * __COLS__ / 24, domeS = Math.min(domeW - 80, 640);
+  vars.mD = {r: [], t: []}; vars.mL = {r: [], t: []};
+  const mb = vars.moon;
+  if (mb.r != null && mb.p && L.lit != null) {
+    const u = (mb.rim ? 6.5 : 10) * 180 / domeS, k = Math.max(0, Math.min(1, L.lit / 100));     // radius: px -> dome units
+    const vec = (al, az) => [Math.cos(al * R) * Math.sin(az * R), Math.cos(al * R) * Math.cos(az * R), Math.sin(al * R)];
+    const m = vec(mb.p[1], mb.p[2]), sn = vec(...sunAt(mb.p[0])), c = m[0] * sn[0] + m[1] * sn[1] + m[2] * sn[2];
+    const q = m.map((x, i) => x + 0.0175 * (sn[i] - c * m[i]) / (Math.sqrt(1 - c * c) || 1)), qn = Math.hypot(...q);
+    const [x0, y0] = xy(rr(mb.p[1]), mb.p[2]), [x1, y1] = xy(rr(Math.asin(q[2] / qn) / R), Math.atan2(q[0], q[1]) / R);
+    const phi = Math.atan2(y1 - y0, x1 - x0), [cx, cy] = xy(mb.r, mb.t);
+    const put = (o, a, b) => { const X = cx + u * (a * Math.cos(phi) - b * Math.sin(phi)), Y = cy + u * (a * Math.sin(phi) + b * Math.cos(phi));
+      o.r.push(Math.hypot(X, Y)); o.t.push((Math.atan2(X, Y) / R + 360) % 360); };
+    for (let a = 0; a <= 360; a += 10) put(vars.mD, Math.cos(a * R), Math.sin(a * R));
+    for (let a = -90; a <= 90; a += 10) put(vars.mL, Math.cos(a * R), Math.sin(a * R));
+    for (let a = 90; a >= -90; a -= 10) put(vars.mL, (1 - 2 * k) * Math.cos(a * R), Math.sin(a * R));
+  }
   // a satellite on the dome only while its pass is under way at T (the brightest, if two)
   const s = (I.passes || []).filter(x => new Date(x.rise).getTime() <= T && new Date(x.end).getTime() >= T)
     .sort((a, b) => a.mag - b.mag)[0];
   vars.iR = []; vars.iT = []; vars.iD = []; vars.iM = null; vars.iC = s ? SATC[s.id] || '#ffffff' : '#ffffff';
+  vars.iS = s ? MSZ(s.mag) : 11;
   if (s) { const seg = (a, b, f) => (a + (((b - a + 540) % 360) - 180) * f + 360) % 360;
     const ti = new Date(s.rise).getTime(), tm = new Date(s.max).getTime(), tf = new Date(s.end).getTime();
     for (let k = 0; k <= 20; k++) { const f = k / 20;
@@ -373,10 +450,10 @@ BUILD = r"""({xs, ys, vars, hass}) => {
       const t = f < 0.5 ? ti + (tm - ti) * f * 2 : tm + (tf - tm) * (f * 2 - 1);
       vars.iR.push(rr(el)); vars.iT.push(az); vars.iD.push(where(satName(s.id, 1), t, el, az)); }
     vars.iM = {r: rr(s.el_max), t: s.az_max,
-      d: S.satMark(satName(s.id, 1), s.visible.slice(11, 16), s.el_max, DIR(s.az_start), DIR(s.az_end))}; }
+      d: S.satMark(satName(s.id, 1), s.visible.slice(11, 16), s.el_max, DIR(s.az_start), DIR(s.az_end))
+        + `<br>${S.level(s.mag)} (${S.magTxt(s.mag)})`}; }
 
   // constellation names clear of every body mark (dome units, 90 = rim)
-  const xy = (r, t) => [r * Math.sin(t * R), r * Math.cos(t * R)];
   const marks = [...vars.slots.filter(b => b.r != null && !b.rim).map(b => xy(b.r, b.t)),
     ...(vars.moon.r != null && !vars.moon.rim ? [xy(vars.moon.r, vars.moon.t)] : []),
     ...(vars.iM ? [xy(vars.iM.r, vars.iM.t)] : [])];
@@ -405,7 +482,7 @@ BUILD = r"""({xs, ys, vars, hass}) => {
   const fromW = dark ? S.fromNow : S.fromAt(hm(T));
   const hasPath = vars.slots.some(b => b.pr.length > 1) || vars.moon.pr.length > 1;
   const hasRim = vars.slots.some(b => b.rim) || vars.moon.rim;
-  vars.nota = [0, 1].map(k => [hasPath ? S.notePath(fromW)[k] : '', hasRim ? S.noteRim[k] : ''].filter(x => x).join('<br>'));
+  vars.nota = [0, 1].map(k => [hasPath ? S.notePath(fromW)[k] : '', hasRim ? S.noteRim[k] : '', S.noteMag[k]].filter(x => x).join('<br>'));
   // timeline: one row per body, a bar while it can be seen; rows in order of appearance
   const span = (a, b) => S.span(hm(a), hm(b), a <= nd + 6e4, b >= nh - 6e4);
   const rows = ps.map(p => { const [c, sym] = BODY[p.id] || ['#ffffff', 'circle'], who = NAME[p.id] || p.id;
@@ -417,6 +494,9 @@ BUILD = r"""({xs, ys, vars, hass}) => {
   // a row per satellite passing tonight
   [...new Set(ip.map(x => x.id))].forEach(id => { const q = ip.filter(x => x.id == id);
     rows.push({n: satName(id, 2), c: SATC[id] || '#ffffff', g: '◆', a: new Date(q[0].visible).getTime(), b: null, ip: q}); });
+  // a Starlink train passing tonight (optional sensor; usually none): one row, three diamonds
+  const tp = (TR.passes || []).filter(x => new Date(x.visible).getTime() < nh && new Date(x.end).getTime() > nd);
+  if (tp.length) rows.push({n: S.trainRow, c: '__TRAINC__', g: '◆◆◆', a: new Date(tp[0].visible).getTime(), b: null, ip: tp, train: true});
   rows.sort((p, q) => p.a - q.a);
   const x0 = vars.kRange[0].getTime(), x1 = vars.kRange[1].getTime();
   vars.tN = rows.length;
@@ -429,21 +509,24 @@ BUILD = r"""({xs, ys, vars, hass}) => {
   const late = bars.filter(([w]) => w.a > Math.max(nd, x0) + 9e5);
   vars.lX = late.map(([w]) => new Date(w.a)); vars.lY = late.map(([, k]) => k); vars.lT = late.map(([w]) => hm(w.a));
   // satellite passes: a diamond at each (a few minutes is too short for a bar)
-  vars.eX = []; vars.eY = []; vars.eD = []; vars.eC = [];
+  vars.eX = []; vars.eY = []; vars.eD = []; vars.eC = []; vars.eS = [];
   rows.forEach((w, k) => (w.ip || []).forEach(x => { const t = new Date(x.visible).getTime();
     if (t >= x0 && t <= x1) { vars.eX.push(new Date(t)); vars.eY.push(k); vars.eC.push(w.c);
-      vars.eD.push(S.passTip(satName(x.id, 1), hm(t), Math.round(x.duration / 60), x.el_max, DIR(x.az_start), DIR(x.az_end))); } }));
+      // sized by brightness; trains have no brightness estimate: the middle size, no brightness line
+      vars.eS.push(x.mag != null ? MSZ(x.mag) : 11);
+      vars.eD.push(S.passTip(w.train ? S.trainName : satName(x.id, 1), hm(t), Math.max(1, Math.round(x.duration / 60)), x.el_max, DIR(x.az_start), DIR(x.az_end))
+        + (x.mag != null ? `<br>${S.level(x.mag)} (${S.magTxt(x.mag)})` : '')); } }));
   const cNow = H.find(x => x[0] <= T && T < x[0] + 36e5);
   vars.sub = (dark ? S.subNow(hm(T)) : best_T ? S.subBest(hm(T)) : S.subAt(hm(T))) + (cNow ? S.clouds(cNow[1]) : '');
   return {xs, ys};
 }"""
 
 # card geometry (px), from the window width: phone = full width; desktop = DOME_COLS of the
-# section's 24 columns, beside Home Assistant's sidebar. s = dome side; leg = legend band;
+# section's 24 columns, beside Home Assistant's sidebar. s = dome side; leg = legend band + notes;
 # th = timeline (20 px a row); ph = plot height. Adjust here if your layout differs.
 GEOM = ("const vw = window.innerWidth, phone = vw < 870;"
         f" const W = phone ? vw - 32 : (vw - 320 - 16) * {DOME_COLS} / 24;"
-        " const s = Math.min(W - 80, 640), leg = phone ? 126 : 96;"
+        " const s = Math.min(W - 80, 640), leg = phone ? 158 : 112;"
         " const th = 20 * Math.max(1, vars.tN || 0), ph = s + leg + 112 + th;")
 POP = '%{customdata}<extra></extra>'
 
@@ -471,8 +554,8 @@ def build_fn(L, ent):
         '__S__': L['js'], '__BODY__': js(BODY), '__GLYPH__': js(GLYPH), '__SATC__': js(SAT_C),
         '__NAME__': js(L['bodies']), '__SATN__': js(L['sats']), '__DIRS__': js(L['dirs']),
         '__CONS__': js(L['constellations']), '__STARN__': js(L['stars']), '__MOONNAME__': js(L['moon']),
-        '__E_SKY__': ent['sky'], '__E_SAT__': ent['satellites'], '__E_CLD__': ent['clouds'],
-        '__MOON__': MOON, '__STARS__': js(stars),
+        '__E_SKY__': ent['sky'], '__E_SAT__': ent['satellites'], '__E_CLD__': ent['clouds'], '__E_TRN__': ent['trains'],
+        '__MOON__': MOON, '__TRAINC__': TRAIN_C, '__COLS__': str(DOME_COLS), '__STARS__': js(stars),
     }
     out = BUILD
     for k, val in tokens.items():
@@ -524,16 +607,24 @@ def dome_card(L, ent):
                   line={'color': MOON, 'width': 1.5, 'shape': 'spline', 'dash': 'dot'}, opacity=0.45,
                   customdata=v('vars.moon ? vars.moon.pd : []'), hovertemplate=POP),
             *planets,
+            # the Moon with its phase: the whole disc dim, the sunlit part bright over it; the
+            # see-through marker on top keeps the pop-up
+            polar('moon disc', mode='lines', cliponaxis=False, fill='toself', fillcolor=MOON_DIM,
+                  r=v('vars.mD ? vars.mD.r : []'), theta=v('vars.mD ? vars.mD.t : []'),
+                  line={'color': SKY, 'width': 2}, hoverinfo='skip'),
+            polar('moon lit', mode='lines', cliponaxis=False, fill='toself', fillcolor=MOON,
+                  r=v('vars.mL ? vars.mL.r : []'), theta=v('vars.mL ? vars.mL.t : []'),
+                  line={'color': MOON, 'width': 0}, hoverinfo='skip'),
             polar('moon', mode='markers', cliponaxis=False,
                   r=v('vars.moon && vars.moon.r != null ? [vars.moon.r] : []'),
                   theta=v('vars.moon && vars.moon.r != null ? [vars.moon.t] : []'),
-                  marker={'size': v('vars.moon && vars.moon.rim ? 13 : 20'), 'color': MOON, 'line': {'color': SKY, 'width': 2}},
+                  marker={'size': v('vars.moon && vars.moon.rim ? 13 : 20'), 'color': 'rgba(0,0,0,0)', 'line': {'width': 0}},
                   customdata=v('vars.moon && vars.moon.r != null ? [vars.moon.d] : []'), hovertemplate=POP),
             polar('satellite', mode='lines+markers',
                   r=v('vars.iR || []'), theta=v('vars.iT || []'),
                   line={'color': v("vars.iC || '#ffffff'"), 'width': 2, 'dash': 'dash'},
                   marker={'symbol': 'diamond', 'color': v("vars.iC || '#ffffff'"),
-                          'size': v('(vars.iR || []).map((_, k) => k == 10 ? 11 : 0)')},
+                          'size': v('(vars.iR || []).map((_, k) => k == 10 ? (vars.iS || 11) : 0)')},
                   customdata=v('vars.iD || []'), hovertemplate=POP),
             {   # cloud strip: one cell per hour, light grey with opacity = cloud cover, the % written in it
                 'entity': '', 'name': 'clouds', 'type': 'bar', 'xaxis': 'x', 'yaxis': 'y', 'showlegend': False,
@@ -563,7 +654,7 @@ def dome_card(L, ent):
             {   # satellite passes
                 'entity': '', 'name': 'satellite passes', 'type': 'scatter', 'mode': 'markers', 'xaxis': 'x', 'yaxis': 'y2',
                 'showlegend': False, 'x': v('vars.eX || []'), 'y': v('vars.eY || []'),
-                'marker': {'symbol': 'diamond', 'size': 11, 'color': v('vars.eC || []'), 'line': {'color': SKY, 'width': 1.5}},
+                'marker': {'symbol': 'diamond', 'size': v('vars.eS || []'), 'color': v('vars.eC || []'), 'line': {'color': SKY, 'width': 1.5}},
                 'customdata': v('vars.eD || []'), 'hovertemplate': POP, 'cliponaxis': False,
             },
             {   # the dome's moment through the timeline
@@ -660,6 +751,7 @@ PRELUDE = """\
 {%- set later = state_attr('__E_SKY__', 'upcoming') or [] -%}
 {%- set sats = state_attr('__E_SAT__', 'passes') or [] -%}
 {%- set hours = state_attr('__E_CLD__', 'hours') or [] -%}
+{%- set trains = state_attr('__E_TRN__', 'passes') or [] -%}
 {%- set names = __NAMES__ -%}
 {%- set satn = __SATN__ -%}
 {%- set marks = __MARKS__ -%}
@@ -668,6 +760,7 @@ PRELUDE = """\
 {%- macro dirn(az) %}{{ dirs[((az + 22.5) // 45) | int % 8] }}{% endmacro -%}
 {%- macro sat_name(id, k) %}{{ satn[id][k] if id in satn else ('satellite ' ~ id) }}{% endmacro -%}
 {%- macro mark(id) %}{% if id in marks %}<font color="{{ marks[id][0] }}">{{ marks[id][1] }}</font> {% endif %}{% endmacro -%}
+{%- macro trainm() %}<font color="__TRAINC__">◆◆◆</font> {% endmacro -%}
 {%- macro diamond(id) %}<font color="{{ satc[id] if id in satc else '#ffffff' }}">◆</font> {% endmacro -%}
 {#- cloud cover (%) of the hour of t, '' without data -#}
 {%- macro cover(t) -%}
@@ -719,17 +812,21 @@ BODY_MD = """\
 {#- one list: tonight's planets and satellite passes in order of appearance (as the timeline),
     each with its mark (same time: by name). Then what is not seen tonight, satellites and the
     planets lost near the Sun in one list, the soonest to be seen again first; last the
-    satellites with no pass in the days asked, by name. Without any pass known (no N2YO key)
-    no satellite is listed. -#}
+    satellites with no pass in the days asked, by name. Without any pass known (the satellite
+    sensor has no data yet) no satellite is listed. Starlink trains (optional sensor, usually
+    none): tonight's passes join the list; with none tonight, the next one gets a line below. -#}
 {%- set it = namespace(items=[]) -%}
 {%- for p in ps %}{% set it.items = it.items + [{'t': p.start, 'nm': names[p.id], 'k': 'p', 'o': p}] %}{% endfor -%}
 {%- set tonight = sats | selectattr('visible', 'lt', n.end) | selectattr('end', 'gt', nows) | list -%}
-{%- for q in tonight %}{% set it.items = it.items + [{'t': q.visible, 'nm': sat_name(q.id, 1), 'k': 's', 'o': q}] %}{% endfor %}
+{%- for q in tonight %}{% set it.items = it.items + [{'t': q.visible, 'nm': sat_name(q.id, 1), 'k': 's', 'o': q}] %}{% endfor -%}
+{%- set tr_next = trains | selectattr('end', 'gt', nows) | list -%}
+{%- set tr_tonight = tr_next | selectattr('visible', 'lt', n.end) | list -%}
+{%- for q in tr_tonight %}{% set it.items = it.items + [{'t': q.visible, 'nm': 'Starlink', 'k': 't', 'o': q}] %}{% endfor %}
 
 <font size="3">{{ title }}</font>
 
 {% for x in it.items | sort(attribute='t,nm') -%}
-{%- if x.k == 's' %}{{ sat_line(x.o) }}{% else %}{{ planet_line(x.o) }}{% endif %}
+{%- if x.k == 's' %}{{ sat_line(x.o) }}{% elif x.k == 't' %}{{ train_line(x.o) }}{% else %}{{ planet_line(x.o) }}{% endif %}
 
 {% endfor -%}
 {%- set nt = namespace(dated=[], none=[]) -%}
@@ -739,8 +836,9 @@ BODY_MD = """\
 {%- else %}{% set nt.none = nt.none + [{'nm': sat_name(id, 1), 'id': id}] %}{% endif -%}
 {%- endfor -%}
 {%- for q in later %}{% set nt.dated = nt.dated + [{'t': q.start, 'nm': names[q.id], 'k': 'p', 'o': q}] %}{% endfor -%}
+{%- if tr_next and not tr_tonight %}{% set nt.dated = nt.dated + [{'t': tr_next[0].visible, 'nm': 'Starlink', 'k': 't', 'o': tr_next[0]}] %}{% endif -%}
 {%- for x in nt.dated | sort(attribute='t,nm') -%}
-{%- if x.k == 's' %}{{ sat_absent(x.id, x.o) }}{% else %}{{ upcoming_line(x.o) }}{% endif %}
+{%- if x.k == 's' %}{{ sat_absent(x.id, x.o) }}{% elif x.k == 't' %}{{ train_absent(x.o) }}{% else %}{{ upcoming_line(x.o) }}{% endif %}
 
 {% endfor -%}
 {%- for x in nt.none | sort(attribute='nm') -%}
@@ -757,6 +855,7 @@ def text_template(L, ent):
         return '{' + ', '.join(f'{k!r}: {json.dumps(val, ensure_ascii=False)}' for k, val in d.items()) + '}'
     pre = PRELUDE
     for k, val in {'__E_SKY__': ent['sky'], '__E_SAT__': ent['satellites'], '__E_CLD__': ent['clouds'],
+                   '__E_TRN__': ent['trains'], '__TRAINC__': TRAIN_C,
                    '__NAMES__': jdict(L['bodies']), '__SATN__': jdict(L['sats']),
                    '__MARKS__': jdict({k: [c, GLYPH[sym]] for k, (c, sym) in BODY.items()}),
                    '__SATC__': jdict(SAT_C)}.items():
@@ -771,7 +870,8 @@ def text_card(L, ent):
             'card_mod': {'style': NIGHT_CARD}}
 
 
-ENTITIES = {'sky': 'sensor.tonight_sky', 'satellites': 'sensor.tonight_satellites', 'clouds': 'sensor.tonight_clouds'}
+ENTITIES = {'sky': 'sensor.tonight_sky', 'satellites': 'sensor.tonight_satellites', 'clouds': 'sensor.tonight_clouds',
+            'trains': 'sensor.tonight_trains'}      # trains are optional: no such sensor, no trains
 
 
 def section(lang, entities=None):

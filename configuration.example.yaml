@@ -1,5 +1,5 @@
-# Add to configuration.yaml. If you already have a `command_line:` section,
-# add the three `- sensor:` entries to it.
+# Add to configuration.yaml. If you already have a `command_line:` or an
+# `automation:` section, add these entries to it.
 command_line:
   # Planets and the Moon tonight: computed locally, no internet
   - sensor:
@@ -16,7 +16,7 @@ command_line:
         - updated
       scan_interval: 3600
       command_timeout: 60
-  # Visible satellite passes: N2YO (needs n2yo_api_key in config.json)
+  # Visible satellite passes: computed locally from CelesTrak's orbits (no key)
   - sensor:
       name: "Tonight satellites"
       unique_id: tonight_satellites
@@ -27,7 +27,7 @@ command_line:
         - passes
         - checked
       scan_interval: 7200
-      command_timeout: 60
+      command_timeout: 120
   # Cloud cover per hour: Open-Meteo
   - sensor:
       name: "Tonight clouds"
@@ -41,6 +41,36 @@ command_line:
         - checked
       scan_interval: 3600
       command_timeout: 30
+  # Optional: Starlink "trains" (newly launched Starlinks still in a row). Downloads a
+  # 5 MB file from CelesTrak three times a day; most weeks there is no train.
+  # Leave this block out and the card simply shows no trains.
+  - sensor:
+      name: "Tonight trains"
+      unique_id: tonight_trains
+      icon: mdi:satellite-uplink
+      command: "python3 /config/tonight_sky/sensors/trains.py"
+      value_template: "{{ value_json.state }}"
+      json_attributes:
+        - passes
+        - trains
+        - checked
+      scan_interval: 7200
+      command_timeout: 120
+
+# Recalculate "tonight" at dawn: the sky sensor runs once an hour, so without this
+# the card can show the night that just ended for up to an hour after dawn.
+automation:
+  - alias: "Tonight: recalculate at dawn"
+    triggers:
+      - trigger: template
+        value_template: >-
+          {{ (state_attr('sensor.tonight_sky', 'night') or {}).get('end', '9')
+             < now().strftime('%Y-%m-%dT%H:%M') }}
+    actions:
+      - action: homeassistant.update_entity
+        target:
+          entity_id: sensor.tonight_sky
+    mode: single
 
 # Optional: the sensors carry long attributes; keep them out of the database
 # recorder:
@@ -49,3 +79,4 @@ command_line:
 #       - sensor.tonight_sky
 #       - sensor.tonight_satellites
 #       - sensor.tonight_clouds
+#       - sensor.tonight_trains
